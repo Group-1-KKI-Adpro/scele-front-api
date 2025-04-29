@@ -1,5 +1,7 @@
 use actix_web::{get, web, Responder, Result};
 use chrono::{DateTime, Utc};
+use scele_frontapi::get_frontpage;
+use scraper::{Html, Selector};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -10,22 +12,41 @@ struct AnnouncementResponse {
     pub date_time: DateTime<Utc>,
 }
 
+fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
+    let selector = Selector::parse("article").unwrap();
+    let elements_iterator = page.select(&selector);
+    let mut announcements = Vec::<AnnouncementResponse>::new();
+
+    for element in elements_iterator {
+        let id = String::from(element.attr("id").unwrap());
+        let title = element
+            .select(&Selector::parse("h3").unwrap())
+            .next()
+            .map(|e| e.text().collect::<String>())
+            .unwrap();
+        let author = element
+            .select(&Selector::parse("a").unwrap())
+            .next()
+            .map(|e| e.text().collect::<String>())
+            .unwrap();
+        
+        let announcement = AnnouncementResponse {
+            id,
+            title,
+            author,
+            date_time: Utc::now(), // TODO: Parse the time value from the HTML
+        };
+
+        announcements.push(announcement);
+    }
+
+    return announcements;
+}
+
 #[get("/announcements")]
 async fn get_all_announcements() -> Result<impl Responder> {
-    let announcements = vec![
-        AnnouncementResponse {
-            id: "1".to_string(),
-            title: "Hello World".to_string(),
-            author: "John Doe".to_string(),
-            date_time: Utc::now(),
-        },
-        AnnouncementResponse {
-            id: "2".to_string(),
-            title: "Another announcement".to_string(),
-            author: "Jane Smith".to_string(),
-            date_time: Utc::now(),
-        },
-    ];
+    let page = get_frontpage("https://scele.cs.ui.ac.id").unwrap();
+    let announcements = parse_frontpage(page);
 
     Ok(web::Json(announcements))
 }
