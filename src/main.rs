@@ -1,16 +1,25 @@
-use actix_web::{get, web, Responder, Result};
+use std::{cell::UnsafeCell, sync::Mutex, thread, time::Duration};
+
+use actix_web::{Responder, Result, get, web};
 use chrono::{DateTime, Utc};
+use rand::Rng;
 use scele_frontapi::get_frontpage;
 use scraper::{Html, Selector};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct AnnouncementResponse {
     pub id: String,
     pub title: String,
     pub author: String,
     pub date_time: DateTime<Utc>,
 }
+
+struct ServerState {
+    pub request_count: UnsafeCell<u8>,
+}
+
+unsafe impl Sync for ServerState {}
 
 fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
     let selector = Selector::parse("article").unwrap();
@@ -44,18 +53,35 @@ fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
 }
 
 #[get("/announcements")]
-async fn get_all_announcements() -> Result<impl Responder> {
+async fn get_all_announcements(data: web::Data<ServerState>) -> Result<impl Responder> {
     let page = get_frontpage("https://scele.cs.ui.ac.id").unwrap();
     let announcements = parse_frontpage(page);
+
+    // Deliberately unsafe, because Rust is too safe for our demo :))
+    unsafe {
+        let request_count_ptr = data.request_count.get();
+        let val = *request_count_ptr;
+        let delay_ms = rand::thread_rng().gen_range(0..1000_u64);
+        thread::sleep(Duration::from_millis(delay_ms));
+        *request_count_ptr = val + 1;
+    }
+    
+    println!("Request count: {}", unsafe { *data.request_count.get() });
 
     Ok(web::Json(announcements))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let state = web::Data::new(ServerState {
+        request_count: UnsafeCell::new(0),
+    });
+
     use actix_web::{App, HttpServer};
 
-    HttpServer::new(|| App::new().service(get_all_announcements))
+    HttpServer::new(move || App::new()
+        .app_data(state.clone())
+        .service(get_all_announcements))
         .bind(("127.0.0.1", 8080))?
         .run()
         .await
