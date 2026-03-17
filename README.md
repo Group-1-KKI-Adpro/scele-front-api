@@ -6,7 +6,7 @@ An API for fetching latest announcements from SCELE's frontpage.
 
 This is an exercise to identify and fix a concurrency issue in a Rust project.
 Every group will work at the same project codebase and present their work independently from the other groups.
-The exercise should be done during online learning weeks and will be presented at the next class session.
+The exercise should be done during online learning weeks and will be presented at the next offline class session (31 March 2026).
 
 Your tasks as a group:
 
