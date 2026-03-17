@@ -61,7 +61,7 @@ async fn get_all_announcements(data: web::Data<ServerState>) -> Result<impl Resp
     unsafe {
         let request_count_ptr = data.request_count.get();
         let val = *request_count_ptr;
-        let delay_ms = rand::thread_rng().gen_range(0..1000_u64);
+        let delay_ms = rand::thread_rng().gen_range(0..1000_u64); // This is to simulate interleaving execution in the thread
         thread::sleep(Duration::from_millis(delay_ms));
         *request_count_ptr = val + 1;
     }
