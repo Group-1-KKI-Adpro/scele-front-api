@@ -1,6 +1,6 @@
-use std::{cell::UnsafeCell, sync::Mutex, thread, time::Duration};
+use std::{sync::Mutex, time::Duration};
 
-use actix_web::{Responder, Result, get, web};
+use actix_web::{error::ErrorInternalServerError, get, web, Responder, Result};
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use scele_frontapi::get_frontpage;
@@ -14,12 +14,11 @@ struct AnnouncementResponse {
     pub author: String,
     pub date_time: DateTime<Utc>,
 }
-
 struct ServerState {
-    pub request_count: UnsafeCell<u8>,
+    pub request_count: Mutex<u64>,
 }
 
-unsafe impl Sync for ServerState {}
+
 
 fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
     let selector = Selector::parse("article").unwrap();
@@ -52,21 +51,35 @@ fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
     return announcements;
 }
 
+// Starts on an Actix Worker thread
 #[get("/announcements")]
 async fn get_all_announcements(data: web::Data<ServerState>) -> Result<impl Responder> {
-    let page = get_frontpage("https://scele.cs.ui.ac.id").unwrap();
-    let announcements = parse_frontpage(page);
+    let delay_ms = rand::thread_rng().gen_range(0..1000_u64);
+    actix_web::rt::time::sleep(Duration::from_millis(delay_ms)).await;
+    // Request goes to wait
+    // There will be Many Waits , the earlier one will lock it self
 
-    // Deliberately unsafe, because Rust is too safe for our demo :))
-    unsafe {
-        let request_count_ptr = data.request_count.get();
-        let val = *request_count_ptr;
-        let delay_ms = rand::thread_rng().gen_range(0..1000_u64); // This is to simulate interleaving execution in the thread
-        thread::sleep(Duration::from_millis(delay_ms));
-        *request_count_ptr = val + 1;
-    }
-    
-    println!("Request count: {}", unsafe { *data.request_count.get() });
+    // get_frontpage and HTML parsing are synchronous
+    let announcements = web::block(|| {
+        let page = get_frontpage("https://scele.cs.ui.ac.id")?;
+        //Retrieve it as Vec<AnnouncementResponse>
+        //if it went well go to Ok(Vec<AnnouncementResponse>)
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(parse_frontpage(page))
+    })
+    .await
+     // Either the Blocking failed or the get_frontpage fails
+    .map_err(ErrorInternalServerError)
+    .and_then(|res| res.map_err(ErrorInternalServerError))?;
+
+
+    // We Lock it here , then safely increment it
+    let request_count = {
+        let mut count = data.request_count.lock().unwrap();
+        *count += 1;
+        *count
+    };
+
+    println!("Request count: {}", request_count);
 
     Ok(web::Json(announcements))
 }
@@ -74,7 +87,7 @@ async fn get_all_announcements(data: web::Data<ServerState>) -> Result<impl Resp
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let state = web::Data::new(ServerState {
-        request_count: UnsafeCell::new(0),
+        request_count: Mutex::new(0),
     });
 
     use actix_web::{App, HttpServer};
