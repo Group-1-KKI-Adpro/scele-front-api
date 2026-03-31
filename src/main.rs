@@ -1,7 +1,7 @@
 use std::{sync::Mutex, time::Duration};
 
 use actix_web::{error::ErrorInternalServerError, get, web, Responder, Result};
-use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, TimeZone, Utc};
 use rand::Rng;
 use scele_frontapi::get_frontpage;
 use scraper::{ElementRef, Html, Selector};
