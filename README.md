@@ -1,4 +1,4 @@
-# SCELE Front API
+[# SCELE Front API
 
 An API for fetching latest announcements from SCELE's frontpage.
 
@@ -70,10 +70,16 @@ Your tasks as a group:
    - Any other improvement that you come up with.
 5. [ ] Answer these questions:
    - How does the new improvement affect the shared data in the `ServerState`?
+     The improvement adds cached announcements and cache timestamp into ServerState. Previously, the shared state 
+   only stored request_count, but now it also stores the latest fetched response. This means multiple requests can 
+   access and update more shared data concurrently, so synchronization is needed not only for the counter but also for the cache.
    - Is there a new concurrency issue?
+   Yes. A new concurrency concern is that if several requests arrive when the cache is empty or expired, they can all 
+   detect a cache miss and perform the same fetch operation at the same time. This does not create a data race because 
+   the cache is protected by a Mutex, but it can cause redundant work and reduce efficiency. This is similar to a cache stampede problem.
 6. [ ] Save your work as new commits in a new branch, and push them to your forked repository on GitHub.
 7. [ ] Create a short, 3-minutes presentation that briefly explain your work.
-
+]
 ## License
 
 This project is licensed under either the following licenses:
