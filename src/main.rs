@@ -1,10 +1,10 @@
 use std::{sync::Mutex, time::Duration};
 
 use actix_web::{error::ErrorInternalServerError, get, web, Responder, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDateTime, Utc};
 use rand::Rng;
 use scele_frontapi::get_frontpage;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 use serde::Serialize;
 
 #[derive(Serialize, Clone)]
@@ -26,30 +26,77 @@ struct ServerState {
     pub cache: Mutex<Option<CacheData>>,
 }
 
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn try_parse_scele_datetime(raw: &str) -> Option<DateTime<Utc>> {
+    let cleaned = raw.trim().trim_start_matches('-').trim();
+
+    let formats = [
+        "%A, %-d %B %Y, %-I:%M %p",
+        "%A, %d %B %Y, %-I:%M %p",
+        "%A, %-d %B %Y, %I:%M %p",
+        "%A, %d %B %Y, %I:%M %p",
+    ];
+
+    for fmt in formats {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(cleaned, fmt) {
+            // SCELE timestamps are shown in WIB (UTC+7)
+            let wib = FixedOffset::east_opt(7 * 3600).unwrap();
+            if let Some(local_dt) = wib.from_local_datetime(&naive).single() {
+                return Some(local_dt.with_timezone(&Utc));
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_announcement_datetime(element: &ElementRef) -> DateTime<Utc> {
+    for text_node in element.text() {
+        let candidate = normalize_whitespace(text_node);
+        if candidate.is_empty() {
+            continue;
+        }
+
+        if let Some(parsed) = try_parse_scele_datetime(&candidate) {
+            return parsed;
+        }
+    }
+
+    // Fallback if the page format changes
+    Utc::now()
+}
+
 fn parse_frontpage(page: Html) -> Vec<AnnouncementResponse> {
     let selector = Selector::parse("article").unwrap();
+    let title_selector = Selector::parse("h3").unwrap();
+    let author_selector = Selector::parse("a").unwrap();
+
     let elements_iterator = page.select(&selector);
     let mut announcements = Vec::<AnnouncementResponse>::new();
 
     for element in elements_iterator {
         let id = String::from(element.attr("id").unwrap_or("unknown"));
+
         let title = element
-            .select(&Selector::parse("h3").unwrap())
+            .select(&title_selector)
             .next()
-            .map(|e| e.text().collect::<String>())
+            .map(|e| normalize_whitespace(&e.text().collect::<String>()))
             .unwrap_or_else(|| "Untitled".to_string());
 
         let author = element
-            .select(&Selector::parse("a").unwrap())
+            .select(&author_selector)
             .next()
-            .map(|e| e.text().collect::<String>())
+            .map(|e| normalize_whitespace(&e.text().collect::<String>()))
             .unwrap_or_else(|| "Unknown".to_string());
 
         let announcement = AnnouncementResponse {
             id,
             title,
             author,
-            date_time: Utc::now(), // TODO: Parse the time value from the HTML
+            date_time: parse_announcement_datetime(&element),
         };
 
         announcements.push(announcement);
