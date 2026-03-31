@@ -70,13 +70,30 @@ Your tasks as a group:
    - Any other improvement that you come up with.
 5. [ ] Answer these questions:
    - How does the new improvement affect the shared data in the `ServerState`?
-     The improvement adds cached announcements and cache timestamp into ServerState. Previously, the shared state 
-   only stored request_count, but now it also stores the latest fetched response. This means multiple requests can 
-   access and update more shared data concurrently, so synchronization is needed not only for the counter but also for the cache.
+     The new improvement adds a cache into ServerState. Before the improvement, the shared state only stored 
+   request_count, which was used to count how many requests had been handled. After the improvement, ServerState now 
+   stores two shared data items: request_count and cache.
+
+    The cache stores the latest list of announcements and also the time when the data was fetched. This affects the 
+shared state because now multiple requests may access not only the counter, but also the cached announcements at the 
+same time. Because of that, both shared variables must be synchronized properly using Mutex.
+
+    This improvement is useful because the server does not need to fetch and parse the SCELE frontpage on every request. 
+If the cached data is still valid within the TTL, the server can return the cached result directly, which improves 
+efficiency and reduces repeated work.
    - Is there a new concurrency issue?
-   Yes. A new concurrency concern is that if several requests arrive when the cache is empty or expired, they can all 
-   detect a cache miss and perform the same fetch operation at the same time. This does not create a data race because 
-   the cache is protected by a Mutex, but it can cause redundant work and reduce efficiency. This is similar to a cache stampede problem.
+     If several requests arrive at almost the same time when the cache is empty or already expired, they can all check 
+   the cache before any one of them updates it. As a result, multiple requests may detect the same cache miss and perform 
+   the same fetch and parsing work simultaneously. This does not create a data race, because access to the cache is still 
+   protected by a Mutex, but it can create redundant work and reduce performance.
+
+    In other words, the shared data is still safe, but the caching system is not fully optimal yet. This situation is 
+similar to a cache stampede, where many requests try to refresh the same cache at once. However, the code already avoids 
+a worse problem by not holding the mutex during the slow network request and parsing process. The lock is only used 
+briefly when checking or updating the cache, so other threads are not blocked for too long.
+
+Also, there is still no deadlock in this implementation because the mutexes are only locked for a short time and there 
+is no circular waiting between threads.
 6. [ ] Save your work as new commits in a new branch, and push them to your forked repository on GitHub.
 7. [ ] Create a short, 3-minutes presentation that briefly explain your work.
 ]
